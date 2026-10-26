@@ -1,0 +1,264 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex">
+<meta name="referrer" content="no-referrer">
+<title>ติ่งโฟน | ยืนยันสัญญาเช่า</title>
+<link href="https://fonts.googleapis.com/css2?family=Sarabun:wght@400;600;700&display=swap" rel="stylesheet">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
+<style>
+  :root { --pink:#FF2E93; }
+  * { box-sizing:border-box; }
+  body { margin:0; font-family:'Sarabun',sans-serif; background:#f6f6f8; color:#111; font-size:16px; line-height:1.5; }
+  .wrap { max-width:820px; margin:0 auto; padding:16px; }
+  .card { background:#fff; border-radius:12px; padding:18px; margin:14px 0; border-top:6px solid var(--pink); }
+  h1 { font-size:22px; margin:0 0 8px; }
+  table { border-collapse:collapse; width:100%; font-size:16px; }
+  td { padding:4px 0; vertical-align:top; } td:first-child { color:#555; width:38%; }
+  #pdf canvas { width:100%; display:block; margin:0 0 10px; box-shadow:0 1px 4px rgba(0,0,0,.2); background:#fff; }
+  #pdf { min-height:120px; }
+  .opt { display:flex; gap:8px; align-items:flex-start; margin:10px 0; font-weight:600; }
+  .opt input { margin-top:5px; transform:scale(1.2); }
+  button { background:var(--pink); color:#fff; border:0; border-radius:10px; padding:14px 18px; font:inherit; font-weight:700; width:100%; cursor:pointer; }
+  button:disabled { background:#bbb; cursor:default; }
+  .fullbtn { display:none; background:#fff; color:var(--pink); border:2px solid var(--pink); padding:12px; margin:4px 0 8px; }
+  .muted { color:#666; font-size:14px; word-break:break-all; }
+  .err { color:#c00; font-weight:600; margin-top:10px; }
+  tr.sum td { border-top:1px solid #eee; padding-top:6px; font-weight:700; color:#111; }
+  .proof { border:2px solid var(--pink); border-radius:10px; padding:12px 14px; margin-top:6px; }
+  .proof .chk { font-weight:700; }
+  .proof .tick { color:#18A957; font-size:20px; margin-right:4px; }
+  .proof table { margin-top:8px; font-size:15px; }
+  .proof .hash { word-break:break-all; font-size:13px; color:#666; }
+  #viewer { display:none; position:fixed; inset:0; z-index:10; background:#3a3a3f; flex-direction:column; }
+  #viewer.on { display:flex; }
+  #vbar { display:flex; gap:8px; padding:8px; background:#222; }
+  #vbar button { width:auto; flex:1; padding:10px 0; }
+  #vbar .z { background:#fff; color:#111; flex:0 0 56px; font-size:20px; }
+  #vscroll { flex:1; overflow:auto; -webkit-overflow-scrolling:touch; padding:8px; }
+  #vscroll #pdf { margin:0 auto; }
+  body.lock { overflow:hidden; }
+</style>
+</head>
+<body>
+<div class="wrap" id="app"><div class="card"><p>กำลังโหลด...</p></div></div>
+<div id="viewer">
+  <div id="vbar">
+    <button class="z" id="zout" type="button">−</button>
+    <button class="z" id="zin" type="button">+</button>
+    <button id="vclose" type="button">ปิด กลับไปหน้ายืนยัน</button>
+  </div>
+  <div id="vscroll"></div>
+</div>
+<script>
+var API = 'https://script.google.com/macros/s/AKfycbx_q-rLptpSRsEm1AR9xxn-j4XpVAf0Y3G5d9u0NA8E8yTxzfwLUb9q1I1KVaShHcE3/exec';
+var TOKEN = new URLSearchParams(location.search).get('t') || '';
+var $ = function (id) { return document.getElementById(id); };
+
+// credentials:'omit' = ไม่ส่งคุกกี้ Google ไปด้วย จึงไม่ติดปัญหาล็อกอินหลายบัญชี
+function call(url, opt) {
+  opt = opt || {};
+  opt.credentials = 'omit';
+  opt.redirect = 'follow';
+  return fetch(url, opt).then(function (r) {
+    if (!r.ok) throw new Error('เชื่อมต่อระบบไม่สำเร็จ กรุณารีเฟรชหน้า');
+    return r.json();
+  }).then(function (j) {
+    if (j.error) throw new Error(j.error);
+    return j;
+  }, function (e) {
+    throw new Error(e && e.message && e.message.indexOf('เชื่อมต่อ') === 0 ? e.message : 'เชื่อมต่อระบบไม่สำเร็จ กรุณาตรวจอินเทอร์เน็ตแล้วรีเฟรชหน้า');
+  });
+}
+function get(api) { return call(API + '?api=' + api + '&t=' + encodeURIComponent(TOKEN)); }
+
+function el(tag, attrs, text) {
+  var e = document.createElement(tag);
+  if (attrs) for (var k in attrs) e.setAttribute(k, attrs[k]);
+  if (text !== undefined) e.textContent = text;
+  return e;
+}
+function row(table, a, b, cls) {
+  var tr = el('tr', cls ? { 'class': cls } : null);
+  tr.appendChild(el('td', null, a));
+  tr.appendChild(el('td', null, b));
+  table.appendChild(tr);
+}
+function fail(msg) {
+  var app = $('app');
+  app.innerHTML = '';
+  var c = el('div', { 'class': 'card' });
+  c.appendChild(el('h1', null, 'ไม่สามารถเปิดสัญญาได้'));
+  c.appendChild(el('p', null, msg));
+  c.appendChild(el('p', null, 'ติดต่อ LINE @353syomk'));
+  app.appendChild(c);
+}
+function showErr(e) {
+  var m = (e && e.message) ? e.message : String(e);
+  var box = $('err') || $('loading') || $('pdf');
+  if (box) box.textContent = m;
+}
+
+function proofBox(p) {
+  var box = el('div', { 'class': 'proof' });
+  var c = el('div', { 'class': 'chk' });
+  c.appendChild(el('span', { 'class': 'tick' }, '☑'));
+  c.appendChild(document.createTextNode(p.text));
+  box.appendChild(c);
+  var tb = el('table');
+  row(tb, 'ยืนยันโดย', p.name);
+  row(tb, 'บัญชี Google', p.google || '-');
+  row(tb, 'วันเวลาที่ยืนยัน', p.at);
+  row(tb, 'เลขสัญญา', p.contractNo);
+  box.appendChild(tb);
+  box.appendChild(el('div', { 'class': 'hash' }, 'SHA-256: ' + p.hash));
+  return box;
+}
+
+function build(info) {
+  var app = $('app');
+  app.innerHTML = '';
+  var c1 = el('div', { 'class': 'card' });
+  c1.appendChild(el('h1', null, 'ตรวจและยืนยันสัญญาเช่า'));
+  var t = el('table');
+  row(t, 'รหัสการจอง', info.bookingId);
+  row(t, 'เลขสัญญา', info.contractNo);
+  row(t, 'ผู้เช่า', info.name);
+  row(t, 'รุ่น', info.model);
+  row(t, 'รับเครื่อง', info.pickup + ' น.');
+  row(t, 'คืนเครื่อง', info.ret);
+  row(t, 'วิธีรับไฟล์', info.delivery || '-');
+  row(t, 'ค่าเช่าทั้งหมด (' + info.days + ' วัน)', info.total + ' บาท');
+  row(t, 'หักมัดจำจอง', '−' + info.deposit + ' บาท');
+  row(t, 'ยอดชำระก่อนรับเครื่อง', info.balance + ' บาท', 'sum');
+  c1.appendChild(t);
+  app.appendChild(c1);
+
+  var c2 = el('div', { 'class': 'card', id: 'pdfcard' });
+  var fb = el('button', { 'class': 'fullbtn', id: 'fullbtn', type: 'button' }, 'เปิดสัญญาเต็มจอ (ซูมได้)');
+  c2.appendChild(fb);
+  var pdf = el('div', { id: 'pdf' });
+  pdf.appendChild(el('p', { id: 'loading' }, 'กำลังโหลดสัญญา...'));
+  c2.appendChild(pdf);
+  c2.appendChild(el('p', { 'class': 'muted' }, 'SHA-256 ของไฟล์: ' + info.hash));
+  app.appendChild(c2);
+
+  var act = el('div', { 'class': 'card', id: 'act' });
+  if (info.confirmed) {
+    var p0 = el('p');
+    p0.appendChild(el('b', null, 'สัญญานี้ยืนยันแล้ว'));
+    p0.appendChild(document.createTextNode(' สำเนาสัญญาและใบหลักฐานการยืนยันส่งไปที่อีเมลของคุณแล้ว'));
+    act.appendChild(p0);
+    if (info.proof) act.appendChild(proofBox(info.proof));
+  } else {
+    var lab = el('label', { 'class': 'opt' });
+    lab.appendChild(el('input', { type: 'checkbox', id: 'agree', disabled: '' }));
+    lab.appendChild(el('span', null, 'ข้าพเจ้าได้อ่านและยอมรับสัญญาเช่า TING PHONE และประกาศความเป็นส่วนตัวแนบท้ายแล้ว ข้าพเจ้ายินยอม'));
+    act.appendChild(lab);
+    act.appendChild(el('button', { id: 'btn', type: 'button', disabled: '' }, 'ยืนยันและยอมรับสัญญา'));
+    act.appendChild(el('p', { 'class': 'muted' }, 'หากข้อมูลในสัญญาไม่ถูกต้อง อย่ากดยืนยัน ให้ติดต่อแอดมินทาง LINE @353syomk เพื่อแก้ไขและรับลิงก์ใหม่'));
+    act.appendChild(el('div', { 'class': 'err', id: 'err' }));
+  }
+  app.appendChild(act);
+
+  fb.addEventListener('click', openViewer);
+  if ($('agree')) {
+    $('agree').addEventListener('change', function () { $('btn').disabled = !this.checked; });
+    $('btn').addEventListener('click', confirmNow);
+  }
+}
+
+function renderPdf(b64) {
+  if (typeof pdfjsLib === 'undefined') throw new Error('โหลดตัวแสดง PDF ไม่สำเร็จ กรุณารีเฟรชหน้า');
+  var bin = atob(b64), u8 = new Uint8Array(bin.length);
+  for (var i = 0; i < bin.length; i++) u8[i] = bin.charCodeAt(i);
+  pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
+  return pdfjsLib.getDocument({ data: u8 }).promise.then(function (pdf) {
+    var box = $('pdf');
+    var w = box.clientWidth;
+    if ($('loading')) $('loading').remove();
+    var chain = Promise.resolve();
+    for (var p = 1; p <= pdf.numPages; p++) {
+      (function (n) {
+        chain = chain.then(function () { return pdf.getPage(n); }).then(function (page) {
+          var vp0 = page.getViewport({ scale: 1 });
+          var scale = Math.min(2400 / vp0.width, Math.max(3, window.devicePixelRatio || 1) * (w / vp0.width));
+          var vp = page.getViewport({ scale: scale });
+          var c = document.createElement('canvas');
+          c.width = Math.floor(vp.width); c.height = Math.floor(vp.height);
+          box.appendChild(c);
+          return page.render({ canvasContext: c.getContext('2d'), viewport: vp }).promise;
+        });
+      })(p);
+    }
+    return chain;
+  }).then(function () {
+    $('fullbtn').style.display = 'block';
+    if ($('agree')) $('agree').disabled = false;
+  });
+}
+
+// ดูเต็มจอในหน้าเดิม: ย้ายกล่องสัญญาไปไว้ในหน้าต่างเต็มจอ แล้วปรับความกว้างเพื่อซูม
+var zoom = 1;
+function setZoom(z) {
+  zoom = Math.max(1, Math.min(3, z));
+  $('pdf').style.width = (zoom * 100) + '%';
+}
+function openViewer() {
+  $('vscroll').appendChild($('pdf'));
+  setZoom(1.5);
+  $('viewer').className = 'on';
+  document.body.className = 'lock';
+}
+function closeViewer() {
+  var card = $('pdfcard');
+  card.insertBefore($('pdf'), card.children[1]);
+  $('pdf').style.width = '';
+  $('viewer').className = '';
+  document.body.className = '';
+}
+$('zin').addEventListener('click', function () { setZoom(zoom + 0.5); });
+$('zout').addEventListener('click', function () { setZoom(zoom - 0.5); });
+$('vclose').addEventListener('click', closeViewer);
+
+function confirmNow() {
+  if (!$('agree').checked) return;
+  $('btn').disabled = true;
+  $('agree').disabled = true;
+  $('btn').textContent = 'กำลังยืนยัน...';
+  $('err').textContent = '';
+  call(API, {
+    method: 'POST',
+    headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+    body: JSON.stringify({ api: 'confirm', t: TOKEN, agreed: true })
+  }).then(function (j) {
+    var res = j.res;
+    var act = $('act');
+    act.innerHTML = '';
+    var h = el('p');
+    h.appendChild(el('b', null, 'ยืนยันสัญญาเรียบร้อยแล้ว'));
+    act.appendChild(h);
+    act.appendChild(el('p', null, res.emailed === false ? 'ระบบส่งอีเมลไม่สำเร็จ แอดมินจะส่งสำเนาสัญญาให้อีกครั้ง' : 'สำเนาสัญญาและใบหลักฐานการยืนยันถูกส่งไปที่อีเมลของคุณแล้ว'));
+    if (res.proof) act.appendChild(proofBox(res.proof));
+  }).catch(function (e) {
+    $('btn').disabled = false;
+    $('agree').disabled = false;
+    $('btn').textContent = 'ยืนยันและยอมรับสัญญา';
+    showErr(e);
+  });
+}
+
+if (!/^[0-9a-f-]{36}$/i.test(TOKEN)) {
+  fail('ลิงก์ไม่ถูกต้อง กรุณาเปิดจากปุ่มในอีเมลอีกครั้ง');
+} else {
+  get('info').then(function (j) {
+    if (!j.info.ok) { fail(j.info.msg); return; }
+    build(j.info);
+    return get('pdf').then(function (p) { return renderPdf(p.b64); }).catch(showErr);
+  }).catch(function (e) { fail(e.message); });
+}
+</script>
+</body>
+</html>
